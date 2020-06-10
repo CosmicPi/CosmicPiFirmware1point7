@@ -23,15 +23,16 @@ Third you can start the calibration mode
 "sudo ./cal-one.sh"
 after executing this you will be prompted to run Minicom, a terminal utility.
 "sudo minicom"
-After a short delay (10s for GPS to initialise) you will be presented with the calibration screen menu.
+After a short delay (a few seconds for GPS to initialise) you will be presented with the calibration screen menu.
+**If the screen stays blank, the calibration menu has probably been missed, you can enter 0 to refresh it.**
 Set the values for:
-HV Channel 1
-HV Channel 2
-DAC Channel 1
-DAC Channel 2
-by following the on screen commands. Ballpark settings for the Version 1.7 Cosmic Pi: DAC = 700 (out of 1024), apply to both channels HV = 160 to 200 (lower = higher voltage).
+HV Channel 1 (suggested start value 180)
+HV Channel 2 (suggested start value 180)
+DAC Channel 1 (suggested start value 780)
+DAC Channel 2 (suggested start value 780)
+by following the on screen commands. Ballpark settings for the Version 1.7 Cosmic Pi: DAC = 750 (out of 1024), apply to both channels HV = 160 to 200 (lower = higher voltage).
 The aim is to get a reasonable number of events with the high voltage as low as possible (but still working) by setting the threshold, without overwhelming the unit with noise (which causes a crash, requiring a reset).
-When you have set the values, you can get an update on the number of cosmic rays captured by pressing 9 to enable counting via interrupt. Once interrupts are enabled, the event count will update each time the menu is refreshed, press 0 and the menu will update the event count. When you have an approximate rate of 3.33 new events per second, the unit is correctly configured. Be careful not to set the HV values too low, as this causes noise in the sensors. 
+When you have set the values for the first time, you can get an update on the number of cosmic rays captured by **pressing 9 to enable counting via interrupt.** Once interrupts are enabled, the event count will update each time the menu is refreshed, press 0 and the menu will update the event count. When you have an approximate rate of 3.33 new events per second, the unit is correctly configured. Be careful not to set the HV values too low, as this causes noise in the sensors. 
 When you are happy with the event rate, press 5 to write to EEPROM and store the values in the Cosmic Pi unit. 
 
 ## 4)To exit minicom press CTRL+A then X and select yes.
