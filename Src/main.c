@@ -649,6 +649,9 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 			Evt_total = Evt_total+Evt_stack; //increment total events
 			//oldtimestamp = gps_timestamp; //backup the old value
 			gps_timestamp = HAL_TIM_ReadCapturedValue(&htim2, TIM_CHANNEL_1);  // capture the first value
+
+			HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_SET);
+
 			//here goes the code to do the readouts; write second
 			//readout events
 			//readout secondary data
@@ -1228,7 +1231,8 @@ int main(void)
 	HAL_NVIC_EnableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
 
 	while(1){
-		GPS_repeater();
+		HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_RESET);
+	GPS_repeater();
 		if (data_ready) {
 			HAL_NVIC_DisableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
 			HAL_UART_Transmit(&huart1, TextOutBuf, strlen(TextOutBuf), 100); //send one char at a time when idle.
