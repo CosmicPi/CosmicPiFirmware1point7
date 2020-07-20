@@ -4,6 +4,8 @@ echo "you must have an internet connection for it to work"
 echo "otherwise it will delete your current firmware"
 echo "which will make re-flashing the detector impossible"
 echo "until you are able to reconnect to the internet"
+echo "there is a copy of the firmware that shipped with"
+echo "your unit in the /backup folder just in case."
 read -p "Continue (y/n)?" CONT
 if [ "$CONT" = "y" ]; then
   echo "starting"

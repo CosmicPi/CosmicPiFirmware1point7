@@ -1,8 +1,6 @@
 sudo systemctl stop cosmicpi-detector.service
 stty -F /dev/serial0 115200
 
-cd CosmicPiFirmware1point7
-
 #script to reset the attached hardware
 
 #18 = boot
@@ -22,18 +20,25 @@ gpio -g write 4 1
 #reset
 gpio -g write 4 0
 
-#set the boot flag high
-gpio -g write 18 1
+#set the cal flag high
+gpio -g write 17 1
 sleep 1 #wait 1 second
 gpio -g write 4 1
 sleep 1
-sudo stm32flash -v -w cosmicfiv.hex /dev/serial0
 
-sudo systemctl start cosmicpi-detector.service
-stty -F /dev/serial0  115200
+stty -F /dev/serial0 19200
 
-#reset
-gpio -g write 18 0
-gpio -g write 4 0
-sleep 1
-gpio -g write 4 1
+echo "now run minicom as sudo and set up device"
+
+#debug via console
+#sudo minicom
+
+#restart the service
+#sudo systemctl start cosmicpi-detector.service
+
+#reset everything and restart
+#gpio -g write 17 0
+#gpio -g write 18 0
+#gpio -g write 4 0
+#sleep 1
+#gpio -g write 4 1
