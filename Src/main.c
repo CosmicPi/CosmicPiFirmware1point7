@@ -1,3 +1,22 @@
+//status 20th july 2020
+//code is fully operational - sensors and cosmic rays are output, together with GPS data
+//picked up without issue by the python daemons on the Pi
+//things which still don't work 100% are:
+//DMA transfers - switched back to conventional for now, DMA usart was causing crashes/hanging
+//DMA interrupts are not handled - might be a cause of this, but handling/interrupts isn't required.
+//Strig A and Strig B signals for calibration don't report in, consider changing the types to volatile
+//code is rather dirty and needs a good clean up!
+//I have a feeling that some events are missed - i.e. every so often data for 1 second doesn't make it in to the output
+//but it's hard to test this without statistical analysis on a decent chunk of data
+//rates reported are within expectations.
+//Calibration values I've been using are DACs at 700-800 (700 > more events)
+//HV at 180 (probably works from 200, but we have some margin here).
+//after calibration is complete, restarting the detector in software causes a crash
+//this doesn't happen when we quit/use the shell scripts
+//shell scripts also need tidying: First flash = Erase and flash, then calibration, then any subsequent flashes (flash/upgrade) should be flashes without erase.
+//consider modification to print calibration values during start up
+//old statuses can be mostly ignored now.
+
 //status 12th july.
 //eeprom isn't working!? need to fix it. can't read/write reliably.. strange behaviour.
 //trying different libraries and changes to .ld file, no success as yet
