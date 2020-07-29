@@ -1357,7 +1357,7 @@ int main(void)
 	while(1){
 
 		//reset the EVT pin each cycle.
-		//HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_RESET);
 		//collect any characters from the GPS and print
 		GPS_repeater();
 
