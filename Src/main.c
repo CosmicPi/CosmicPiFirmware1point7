@@ -1,3 +1,8 @@
+//status 27 july 2020
+//gps issue appears resolved? but system crashes after only 1-2 pps... pps pulses are now shorter
+//10ms as opposed to 100ms. This might be an issue.
+//check activities within the pps interrupt next time.
+
 //status 20th july 2020
 //code is fully operational - sensors and cosmic rays are output, together with GPS data
 //picked up without issue by the python daemons on the Pi
@@ -17,10 +22,19 @@
 //consider modification to print calibration values during start up
 //old statuses can be mostly ignored now.
 
+//status 20th july - updated
+//doesn't seem to work on units that weren't the sample - crashing.
+//found and fixed a bug in the eeprom loading routine, regarding readback values for the key (was wrong variable)
+//somehow missing the timer info from the calibration routine
+//events/second value counts up (events or seconds?) when running calibration on units that aren't the golden unit.
+//more testing required.
+
 //status 12th july.
 //eeprom isn't working!? need to fix it. can't read/write reliably.. strange behaviour.
 //trying different libraries and changes to .ld file, no success as yet
 
+
+//july 27th - still random issues with GPS. now unit is working, but crashes on first pps. ?
 
 /* USER CODE BEGIN Header */
 /**
@@ -86,6 +100,19 @@
 #define ZDA    "$PMTK314,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0*29\r\n" // ZDA
 #define GGAZDA    "$PMTK314,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0*28\r\n" // GGA & ZDA
 #define GGA    "$PMTK314,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*29\r\n" // GGA
+#define GPSBAUDF "$PMTK251,115200*1F\r\n" //set as a one time thing; then we need to reboot the uart.
+#define GPSBAUDM "$PMTK251,19200*25\r\n" //set as a one time thing; then we need to reboot the uart.
+#define GPSBAUDS "$PMTK251,9600*17\r\n" //set as a one time thing; then we need to reboot the uart.
+#define GPSSETPPS "$PMTK285,1,100*3D\r\n" //set the PPS to work
+#define GPSRESET "$PMTK104*37\r\n" //full reset of the GPS unit, all settings 0
+#define GPSOFFSET "$PMTK255,1*2D\r\n" //make the nema come after the pps.
+
+
+#define FMWVERS   "$PMTK605*31\r\n"             // PMTK_Q_RELEASE gets the firmware version
+// Sets the update intervall
+#define NORMAL    "$PMTK220,1000*1F\r\n"          // PMTK_SET_NMEA_UPDATE_1HZ
+// disables updates for the antenna status (only Adafruit ultimate GPS?)
+#define NOANTENNA "$PGCMD,33,0*6D\r\n"          // PGCMD_NOAN -> not required for L76
 
 #define dac1_default 750
 #define dac2_default 750
@@ -95,38 +122,28 @@
 #define little_g 9.80665
 
 
-// gets the firmware version
-#define FMWVERS   "$PMTK605*31\r\n"             // PMTK_Q_RELEASE
-// Sets the update intervall
-#define NORMAL    "$PMTK220,1000*1F\r\n"          // PMTK_SET_NMEA_UPDATE_1HZ
-// disables updates for the antenna status (only Adafruit ultimate GPS?)
-#define NOANTENNA "$PGCMD,33,0*6D\r\n"          // PGCMD_NOAN
 
+//some eeprom stuff - probably not used? check and delete
 #define DATA_EEPROM_BASE_ADDR ((uint32_t)0x08060000) /* Data EEPROM base address */
 #define DATA_EEPROM_END_ADDR  ((uint32_t)0x08060080) /* Data EEPROM end address */
 uint16_t eeprom_addr_offset = 0x0040;
-/* Virtual address defined by the user: 0xFFFF value is prohibited */
-//uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555};
-//uint16_t VarDataTab[NB_OF_VAR] = {0};
-//uint16_t VarValue,VarDataTmp = 0;
-//static void Error_Handler(void);
-
+//eeprom stuff that definitely is used.
 uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5000, 0x6000, 0x7000, 0x8000, 0x9000};
 uint16_t VarDataTab[NB_OF_VAR] = {0, 0, 0, 0, 0};
 uint16_t VarValue,VarDataTmp = 0;
+uint32_t eeprom_value=0; //variable for reading/writing from/to eeprom
+
+
 //we define 32 addresses, each one is 32 bits long
-//define for the lsm9ds1
+//define for the lsm9ds1 - sensor bus for i2c, specific.
 #define SENSOR_BUS hi2c1
 
+
 ADC_HandleTypeDef hadc1;
-
 I2C_HandleTypeDef hi2c1;
-
 SPI_HandleTypeDef hspi2;
-
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
-
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart1_tx;
@@ -134,14 +151,10 @@ DMA_HandleTypeDef hdma_usart2_rx;
 
 /* USER CODE BEGIN PV */
 
-//static const uint16_t DAC_addr = 0x60 ;
-//static const uint8_t DAC_ch1 = 0x00;
-//static const uint8_t DAC_ch2 = 0x08;
-
-//static const float seaLevelhPa=101325;
-
+//define bmp280
 BMP280_HandleTypedef bmp280;
 
+//print out variables for IMU
 float accelx=0;
 float accely=0;
 float accelz=0;
@@ -150,12 +163,13 @@ float magx=0;
 float magy=0;
 float magz=0;
 
-
 float pressure, temperature, humidity;
 
 uint16_t size;
 uint8_t Data[256];
 
+
+//calibration variables - used when checking performance during cal mode.
 uint16_t cal_events=0; //number of events per second in calibration mode
 uint16_t cal_cumulative=0; //cumulative count of events in calibration mode
 uint16_t a_events=0; //events on channel a in calibration mode
@@ -163,12 +177,11 @@ uint16_t b_events=0; //events on channel b in calibration mode
 float rolling_average=0; //moving average of events
 uint16_t cal_timer=0; //timer for calibration mode.
 
-
-
+//text output; one buffer used at present
+//will switch to using both via DMA when DMA is working.
 uint8_t TextOutBuf[1024];
 uint8_t Bbuffer[1024];
-volatile uint8_t toggle = 0;
-uint32_t eeprom_value=0; //variable for reading/writing from/to eeprom
+volatile uint8_t toggle = 0; //buffer toggle, not yet used.
 
 //dma handler for usart1
 DMA_HandleTypeDef hdma_usart1_tx;
@@ -176,7 +189,7 @@ uint32_t oldtimestamp =0;
 int16_t convtemp=0;
 float float_temp=0;
 
-//timer values for the first interrupt (ch1)
+//timer values for the first interrupt (ch1) - also not sure if used.
 uint32_t IC_Value1 = 0;
 uint32_t IC_Value2 = 0;
 uint32_t Difference = 0;
@@ -184,12 +197,14 @@ uint32_t Frequency = 0;
 uint8_t Is_First_Captured = 0;  // 0- not captured, 1- captured
 
 uint32_t Evt_stack =0; //number of cosmic ray events this second
-uint32_t Evt_timestamps[30]; //space for 30 events per second
+uint32_t Evt_timestamps[30]; //space for 30 events per second, no overflow as yet!
 uint32_t Evt_total = 0; //total events since start of operation
-uint32_t gps_timestamp =0;
+uint32_t gps_timestamp =0; //value of TIM2 when GPS PPS arrives.
 
 uint8_t data_ready=0; //flag for data ready to send to UART1 via DMA.
 uint8_t cal_mode=0; //flag for calibration mode
+uint8_t imu_failed=0; //flag for failure of imu/mmu chip. One board had a failed IMU in testing
+uint8_t pps_started=0;
 
 //eeprom usage map
 /*
@@ -217,6 +232,7 @@ static void MX_SPI2_Init(void);
 uint16_t eeprom_read(uint16_t eeprom_address);
 static void EXTILine11_Config(void); //the interrupt thingy.
 static void EXTILine12_Config(void); //the interrupt thingy.
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -257,12 +273,11 @@ static sensbus_t mag_bus = {&SENSOR_BUS,
 		0,
 		0};
 
-
-
 static axis3bit16_t data_raw_acceleration;
 static axis3bit16_t data_raw_angular_rate;
 static axis3bit16_t data_raw_magnetic_field;
 static float acceleration_mg[3];
+
 //static float angular_rate_mdps[3];
 static float magnetic_field_mgauss[3];
 static lsm9ds1_id_t whoamI;
@@ -271,8 +286,14 @@ static uint8_t rst;
 static uint8_t tx_buffer[1000];
 
 
+//instances for the accel and mag
+//init the device here;
+stmdev_ctx_t dev_ctx_imu;
+stmdev_ctx_t dev_ctx_mag;
+uint8_t imu_temp[2];
 
-//usart part printf
+//usart part printf- doesn't seem to work anymore.
+//did work when it was first added?
 /* We need to implement own __FILE struct */
 /* FILE struct is used from __FILE */
 struct __FILE {
@@ -293,9 +314,23 @@ int ferror(FILE *f){
 
 void GPS_repeater(void)
 {
-	uint8_t buffer[1];
-	HAL_UART_Receive(&huart2, buffer, sizeof(buffer), HAL_MAX_DELAY);
-	HAL_UART_Transmit(&huart1, buffer, sizeof(buffer), HAL_MAX_DELAY);
+	//modify the gps routine so that it runs continuously to allow config changes in realtime.
+
+	//while(1){
+		uint8_t buffer[1];
+		uint8_t byte;
+		//memset(&buffer[0], 0, sizeof(buffer));
+		HAL_UART_Receive(&huart2, &buffer, 1, 400); //delay is arbitrary here - less than 1s otherwise interrupt
+		HAL_UART_Transmit(&huart1, &buffer, 1, HAL_MAX_DELAY); //delay here has no function, it comes out as soon as it goes in.
+
+		//modified for bidirectional 27/07/20
+		//use only when debugging
+		//memset(&TextOutBuf[0], 0, sizeof(TextOutBuf));
+		//memset(&buffer[0], 0, sizeof(buffer));
+
+		//HAL_UART_Receive(&huart1, &byte, 1, 100);
+		//	HAL_UART_Transmit(&huart2, &byte, 1, 10);
+	//}
 
 }
 
@@ -326,6 +361,7 @@ void set_HV(uint8_t chan, uint8_t voltage)
 	HAL_GPIO_WritePin(hvpsu_cs1_GPIO_Port, hvpsu_cs1_Pin, GPIO_PIN_SET);
 	HAL_GPIO_WritePin(hvpsu_cs2_GPIO_Port, hvpsu_cs2_Pin, GPIO_PIN_SET);
 	HAL_Delay(10);
+	debugPrint(&huart1, "Setting HV completed.\r\n"); // print
 }
 void set_DAC(uint8_t chan, uint16_t thresh)
 {
@@ -359,6 +395,8 @@ void set_DAC(uint8_t chan, uint16_t thresh)
 		HAL_I2C_Master_Transmit(&hi2c1,0x60<<1,buffer,3,100);
 
 	}
+	debugPrint(&huart1, "Setting DAC completed.\r\n"); // print
+
 }
 
 //global variables for eeprom ops
@@ -373,19 +411,31 @@ uint16_t HV_channel2=190;
 void gps_init()
 {
 	//init GPS to send the right strings only.
-
+	//we do this a bunch of times to be sure it works.
 	printf("Start GPS init.\r\n");
-	HAL_UART_Transmit(&huart2, NOANTENNA, sizeof(NOANTENNA), HAL_MAX_DELAY);
-
+	HAL_Delay(5000);
+	HAL_UART_Transmit(&huart2, GPSRESET, sizeof(GPSRESET), HAL_MAX_DELAY);
+	HAL_Delay(5000);
+	HAL_UART_Transmit(&huart2, GPSSETPPS, sizeof(GPSSETPPS), HAL_MAX_DELAY);
+	//HAL_Delay(100);
+	HAL_Delay(100);
 	HAL_UART_Transmit(&huart2, GGAZDA, sizeof(GGAZDA), HAL_MAX_DELAY);
-
-	HAL_UART_Transmit(&huart2, NORMAL, sizeof(NORMAL), HAL_MAX_DELAY);
-	HAL_Delay(1500); //1.5s delay for boot
-	HAL_UART_Transmit(&huart2, NOANTENNA, sizeof(NOANTENNA), HAL_MAX_DELAY);
-
+	//HAL_Delay(100);
+	HAL_Delay(100);
+	//HAL_Delay(1500); //1.5s delay for boot
+	HAL_UART_Transmit(&huart2, GPSSETPPS, sizeof(GPSSETPPS), HAL_MAX_DELAY);
+	//HAL_Delay(100);
+	HAL_Delay(100);
 	HAL_UART_Transmit(&huart2, GGAZDA, sizeof(GGAZDA), HAL_MAX_DELAY);
-
-	HAL_UART_Transmit(&huart2, NORMAL, sizeof(NORMAL), HAL_MAX_DELAY);
+	HAL_Delay(100);
+	//HAL_Delay(100);
+	HAL_UART_Transmit(&huart2, GGAZDA, sizeof(GGAZDA), HAL_MAX_DELAY);
+	HAL_Delay(100);
+	HAL_UART_Transmit(&huart2, GPSSETPPS, sizeof(GPSSETPPS), HAL_MAX_DELAY);
+	HAL_Delay(100); //1.5s delay for boot
+	HAL_UART_Transmit(&huart2, GPSSETPPS, sizeof(GPSSETPPS), HAL_MAX_DELAY);
+	HAL_Delay(100);
+	HAL_UART_Transmit(&huart2, GPSOFFSET, sizeof(GPSSETPPS), HAL_MAX_DELAY);
 
 	debugPrint(&huart1, "Completed GPS init.\r\n");
 
@@ -457,41 +507,54 @@ static int32_t platform_write(void *handle, uint8_t reg, uint8_t *bufp,
 	return 0;
 }
 
-//instances for the accel and mag
-//init the device here;
-stmdev_ctx_t dev_ctx_imu;
-stmdev_ctx_t dev_ctx_mag;
-uint8_t imu_temp[2];
 
 void lsm9ds1_read_data_polling(void)
 {
 
+
+	debugPrint(&huart1, "Reg writing IMU\r\n");
 	/* Initialize inertial sensors (IMU) driver interface */
 	dev_ctx_imu.write_reg = platform_write;
 	dev_ctx_imu.read_reg = platform_read;
 	dev_ctx_imu.handle = (void*)&imu_bus;
 
+	debugPrint(&huart1, "Reg writing mmu\r\n");
 	/* Initialize magnetic sensors driver interface */
 	dev_ctx_mag.write_reg = platform_write;
 	dev_ctx_mag.read_reg = platform_read;
 	dev_ctx_mag.handle = (void*)&mag_bus;
 
+
+	debugPrint(&huart1, "Platform init...\r\n");
 	/* Initialize platform specific hardware */
 	platform_init();
 
+
+	debugPrint(&huart1, "Boot delay...\r\n");
 	/* Wait sensor boot time */
 	HAL_Delay(100);
 
 	/* Check device ID */
+
+	debugPrint(&huart1, "ID check...\r\n");
 	lsm9ds1_dev_id_get(&dev_ctx_mag, &dev_ctx_imu, &whoamI);
+	debugPrint(&huart1, "ID return...\r\n");
+	size = sprintf((char *)Data, "Whoamivals imu: %d, mag: %d \r\n", whoamI.imu, whoamI.mag);
+	HAL_UART_Transmit(&huart1, Data, size, 1000);
+
+
 	if (whoamI.imu != LSM9DS1_IMU_ID || whoamI.mag != LSM9DS1_MAG_ID){
-		while(1){
-			/* manage here device not found */
-			printf("address error");
-		}
+		//while(1){
+		/* manage here device not found */
+		debugPrint(&huart1, "IMU error. IMU/MAG offline\r\n");
+		imu_failed = 1;
+		//			printf("address error");
+		//}
 	}
 
 	/* Restore default configuration */
+
+	debugPrint(&huart1, "Config restore...\r\n");
 	lsm9ds1_dev_reset_set(&dev_ctx_mag, &dev_ctx_imu, PROPERTY_ENABLE);
 	do {
 		lsm9ds1_dev_reset_get(&dev_ctx_mag, &dev_ctx_imu, &rst);
@@ -500,11 +563,15 @@ void lsm9ds1_read_data_polling(void)
 	/* Enable Block Data Update */
 	lsm9ds1_block_data_update_set(&dev_ctx_mag, &dev_ctx_imu, PROPERTY_ENABLE);
 
+
+	debugPrint(&huart1, "Set scale...\r\n");
 	/* Set full scale */
 	lsm9ds1_xl_full_scale_set(&dev_ctx_imu, LSM9DS1_2g);
 	lsm9ds1_gy_full_scale_set(&dev_ctx_imu, LSM9DS1_2000dps);
 	lsm9ds1_mag_full_scale_set(&dev_ctx_mag, LSM9DS1_16Ga);
 
+
+	debugPrint(&huart1, "Set bandwidth...\r\n");
 	/* Configure filtering chain - See datasheet for filtering chain details */
 	/* Accelerometer filtering chain */
 	lsm9ds1_xl_filter_aalias_bandwidth_set(&dev_ctx_imu, LSM9DS1_AUTO);
@@ -515,6 +582,8 @@ void lsm9ds1_read_data_polling(void)
 	lsm9ds1_gy_filter_hp_bandwidth_set(&dev_ctx_imu, LSM9DS1_HP_MEDIUM);
 	lsm9ds1_gy_filter_out_path_set(&dev_ctx_imu, LSM9DS1_LPF1_HPF_LPF2_OUT);
 
+
+	debugPrint(&huart1, "Set outputmode...\r\n");
 	/* Set Output Data Rate / Power mode */
 	lsm9ds1_imu_data_rate_set(&dev_ctx_imu, LSM9DS1_IMU_59Hz5);
 	lsm9ds1_mag_data_rate_set(&dev_ctx_mag, LSM9DS1_MAG_UHP_10Hz);
@@ -524,76 +593,79 @@ void lsm9ds1_read_data_polling(void)
 	//{
 	/* Read device status register */
 
+	debugPrint(&huart1, "Completed.\r\n");
 }
 
 
 void read_imu()
 {
-	lsm9ds1_dev_status_get(&dev_ctx_mag, &dev_ctx_imu, &reg);
+	if (imu_failed == 0) {
+		lsm9ds1_dev_status_get(&dev_ctx_mag, &dev_ctx_imu, &reg);
 
-	if ( reg.status_imu.xlda && reg.status_imu.gda )
-	{
-		/* Read imu data */
-		memset(data_raw_acceleration.u8bit, 0x00, 3 * sizeof(int16_t));
-		memset(data_raw_angular_rate.u8bit, 0x00, 3 * sizeof(int16_t));
+		if ( reg.status_imu.xlda && reg.status_imu.gda )
+		{
+			/* Read imu data */
+			memset(data_raw_acceleration.u8bit, 0x00, 3 * sizeof(int16_t));
+			memset(data_raw_angular_rate.u8bit, 0x00, 3 * sizeof(int16_t));
 
-		lsm9ds1_acceleration_raw_get(&dev_ctx_imu, data_raw_acceleration.u8bit);
-		lsm9ds1_angular_rate_raw_get(&dev_ctx_imu, data_raw_angular_rate.u8bit);
+			lsm9ds1_acceleration_raw_get(&dev_ctx_imu, data_raw_acceleration.u8bit);
+			lsm9ds1_angular_rate_raw_get(&dev_ctx_imu, data_raw_angular_rate.u8bit);
 
-		acceleration_mg[0] = lsm9ds1_from_fs4g_to_mg(data_raw_acceleration.i16bit[0]);
-		acceleration_mg[1] = lsm9ds1_from_fs4g_to_mg(data_raw_acceleration.i16bit[1]);
-		acceleration_mg[2] = lsm9ds1_from_fs4g_to_mg(data_raw_acceleration.i16bit[2]);
+			acceleration_mg[0] = lsm9ds1_from_fs4g_to_mg(data_raw_acceleration.i16bit[0]);
+			acceleration_mg[1] = lsm9ds1_from_fs4g_to_mg(data_raw_acceleration.i16bit[1]);
+			acceleration_mg[2] = lsm9ds1_from_fs4g_to_mg(data_raw_acceleration.i16bit[2]);
 
-		//angular_rate_mdps[0] = lsm9ds1_from_fs2000dps_to_mdps(data_raw_angular_rate.i16bit[0]);
-		//angular_rate_mdps[1] = lsm9ds1_from_fs2000dps_to_mdps(data_raw_angular_rate.i16bit[1]);
-		//angular_rate_mdps[2] = lsm9ds1_from_fs2000dps_to_mdps(data_raw_angular_rate.i16bit[2]);
+			//angular_rate_mdps[0] = lsm9ds1_from_fs2000dps_to_mdps(data_raw_angular_rate.i16bit[0]);
+			//angular_rate_mdps[1] = lsm9ds1_from_fs2000dps_to_mdps(data_raw_angular_rate.i16bit[1]);
+			//angular_rate_mdps[2] = lsm9ds1_from_fs2000dps_to_mdps(data_raw_angular_rate.i16bit[2]);
 
-		accelx = ((acceleration_mg[0] /1000)*little_g/2);
-		accely = ((acceleration_mg[1] /1000)*little_g/2);
-		accelz = ((acceleration_mg[2] /1000)*little_g/2);
+			accelx = ((acceleration_mg[0] /1000)*little_g/2);
+			accely = ((acceleration_mg[1] /1000)*little_g/2);
+			accelz = ((acceleration_mg[2] /1000)*little_g/2);
 
-		sprintf((char*)TextOutBuf+strlen(TextOutBuf), "AccelX: %2.6f;\r\nAccelY: %2.6f;\r\nAccelZ: %2.6f;\r\n",
-				accelx, accely, accelz);
-		//angular_rate_mdps[0], angular_rate_mdps[1], angular_rate_mdps[2]);
-		//tx_com(tx_buffer, strlen((char const*)tx_buffer));
+			sprintf((char*)TextOutBuf+strlen(TextOutBuf), "AccelX: %2.6f;\r\nAccelY: %2.6f;\r\nAccelZ: %2.6f;\r\n",
+					accelx, accely, accelz);
+			//angular_rate_mdps[0], angular_rate_mdps[1], angular_rate_mdps[2]);
+			//tx_com(tx_buffer, strlen((char const*)tx_buffer));
 
-		//sprintf(IMUtext, "MagX: %2.6f;\r\nMagY: %2.6f;\r\nMagZ: %2.6f;\r\n", magx, magy, magz);
-		//WriteStringToOutputBuff(IMUtext);
-		//sprintf(IMUtext, "AccelX: %2.6f;\r\nAccelY: %2.6f;\r\nAccelZ: %2.6f;\r\n",gravx, gravy, gravz);
-		//WriteStringToOutputBuff(IMUtext);
+			//sprintf(IMUtext, "MagX: %2.6f;\r\nMagY: %2.6f;\r\nMagZ: %2.6f;\r\n", magx, magy, magz);
+			//WriteStringToOutputBuff(IMUtext);
+			//sprintf(IMUtext, "AccelX: %2.6f;\r\nAccelY: %2.6f;\r\nAccelZ: %2.6f;\r\n",gravx, gravy, gravz);
+			//WriteStringToOutputBuff(IMUtext);
 
+		}
+
+		if ( reg.status_mag.zyxda )
+		{
+			/* Read magnetometer data */
+			memset(data_raw_magnetic_field.u8bit, 0x00, 3 * sizeof(int16_t));
+
+			lsm9ds1_magnetic_raw_get(&dev_ctx_mag, data_raw_magnetic_field.u8bit);
+
+			magnetic_field_mgauss[0] = lsm9ds1_from_fs16gauss_to_mG(data_raw_magnetic_field.i16bit[0]);
+			magnetic_field_mgauss[1] = lsm9ds1_from_fs16gauss_to_mG(data_raw_magnetic_field.i16bit[1]);
+			magnetic_field_mgauss[2] = lsm9ds1_from_fs16gauss_to_mG(data_raw_magnetic_field.i16bit[2]);
+
+			sprintf((char*)TextOutBuf+strlen(TextOutBuf), "MagX: %2.6f;\r\nMagY: %2.6f;\r\nMagZ: %2.6f;\r\n",
+					(magnetic_field_mgauss[0]/1000), (magnetic_field_mgauss[1]/1000), (magnetic_field_mgauss[2]/1000));
+			//tx_com(tx_buffer, strlen((char const*)tx_buffer));
+
+
+			//there is a problem with this temperature reading. 160720 - starts reading out 4000? was working before.
+			//now we print out the temp
+			lsm9ds1_temperature_raw_get(&dev_ctx_imu, imu_temp);
+			convtemp = ((imu_temp[1] << 8) + imu_temp[0]);
+			float_temp = (convtemp / 16) + 27.5f;
+			//sprintf((char*)TextOutBuf+strlen(TextOutBuf), "acceltemp:%3.6f;\r\n",convtemp);
+
+			sprintf((char*)TextOutBuf+strlen(TextOutBuf), "TemperatureCHumid:%3.6f;\r\n",float_temp);
+			//tx_com(tx_buffer, strlen((char const*)tx_buffer));
+
+			//temp is working again now? not sure why it broke...
+
+		}
+		//}
 	}
-
-	if ( reg.status_mag.zyxda )
-	{
-		/* Read magnetometer data */
-		memset(data_raw_magnetic_field.u8bit, 0x00, 3 * sizeof(int16_t));
-
-		lsm9ds1_magnetic_raw_get(&dev_ctx_mag, data_raw_magnetic_field.u8bit);
-
-		magnetic_field_mgauss[0] = lsm9ds1_from_fs16gauss_to_mG(data_raw_magnetic_field.i16bit[0]);
-		magnetic_field_mgauss[1] = lsm9ds1_from_fs16gauss_to_mG(data_raw_magnetic_field.i16bit[1]);
-		magnetic_field_mgauss[2] = lsm9ds1_from_fs16gauss_to_mG(data_raw_magnetic_field.i16bit[2]);
-
-		sprintf((char*)TextOutBuf+strlen(TextOutBuf), "MagX: %2.6f;\r\nMagY: %2.6f;\r\nMagZ: %2.6f;\r\n",
-				(magnetic_field_mgauss[0]/1000), (magnetic_field_mgauss[1]/1000), (magnetic_field_mgauss[2]/1000));
-		//tx_com(tx_buffer, strlen((char const*)tx_buffer));
-
-
-		//there is a problem with this temperature reading. 160720 - starts reading out 4000? was working before.
-		//now we print out the temp
-		lsm9ds1_temperature_raw_get(&dev_ctx_imu, imu_temp);
-		convtemp = ((imu_temp[1] << 8) + imu_temp[0]);
-		float_temp = (convtemp / 16) + 27.5f;
-		//sprintf((char*)TextOutBuf+strlen(TextOutBuf), "acceltemp:%3.6f;\r\n",convtemp);
-
-		sprintf((char*)TextOutBuf+strlen(TextOutBuf), "TemperatureCHumid:%3.6f;\r\n",float_temp);
-		//tx_com(tx_buffer, strlen((char const*)tx_buffer));
-
-		//temp is working again now? not sure why it broke...
-
-	}
-	//}
 }
 
 
@@ -627,10 +699,21 @@ void print_buffer(void)
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
 	HAL_NVIC_DisableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
-	memset(TextOutBuf,0,strlen(TextOutBuf));
+	//memset(TextOutBuf,0,strlen(TextOutBuf));
+
+	//debugPrint(&huart1, "TIM2\r\n");
 
 	if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1)  // if interrput source is channel 1
 	{
+		pps_started = 1;
+		//here we are in the PPS case. Clear the buffer
+		memset(TextOutBuf,0,strlen(TextOutBuf));
+
+
+		//debugPrint(&huart1, "GPSPPS\r\n");
+		HAL_GPIO_TogglePin(pwr_led_GPIO_Port,pwr_led_Pin);
+		sprintf((char*)TextOutBuf+strlen(TextOutBuf), "PPS: GPS lock:1;\r\n");
+
 		if (cal_mode==1)
 		{
 			//in calibration mode, put the number of events in a print buffer and print it directly.
@@ -647,7 +730,10 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 			}
 			rolling_average = (float)cal_cumulative/(float)cal_timer;
 
-			//memset(&TextOutBuf[0], 0, sizeof(TextOutBuf));
+			memset(&TextOutBuf[0], 0, sizeof(TextOutBuf));
+
+			sprintf((char*)TextOutBuf, "Cal - Events: %d, Ch_A: %d, Ch_B: %d, Timer: %d, Rolling average: %f\r\n", cal_events, a_events, b_events, cal_timer, rolling_average);
+
 
 			//bme_readout();
 			//read_imu();
@@ -659,40 +745,38 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 			//HAL_UART_Transmit_DMA(&huart1, TextOutBuf, 1024); //this is the best way to send the data,
 			//but probably can't be dynamically sized. must find a way to send it all.
 			data_ready=1;
-			//HAL_GPIO_TogglePin(pwr_led_GPIO_Port,pwr_led_Pin);
-			//HAL_GPIO_TogglePin(evt_led_GPIO_Port,evt_led_Pin); //in calibration mode we flash both pins at .5hz
+
 		}
 		else
 		{
+			//normal operation mode
 			//debugPrint(&huart1, "PPS\r\n");
 			Evt_total = Evt_total+Evt_stack; //increment total events
 			//oldtimestamp = gps_timestamp; //backup the old value
 			gps_timestamp = HAL_TIM_ReadCapturedValue(&htim2, TIM_CHANNEL_1);  // capture the first value
 
-			HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_SET);
+			//HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_SET);
 
 			//here goes the code to do the readouts; write second
 			//readout events
 			//readout secondary data
 			//now reset the counter to 0;
-//print sensors was here, moving to main loop
+			//print sensors was here, moving to main loop
 			bme_readout();
 			read_imu();
 			avg_temp_print();
 
-			sprintf((char*)TextOutBuf+strlen(TextOutBuf), "PPS: GPS lock:1;\r\n");
-
 			if (Evt_stack > 0) {
-			for (uint8_t prt_ctr=0; prt_ctr<(Evt_stack+1); prt_ctr++)
-			{
-				sprintf((char*)TextOutBuf+strlen(TextOutBuf), "Event: sub second micros:%d/%d; Event Count: %d\r\n", Evt_timestamps[prt_ctr], gps_timestamp, prt_ctr+1);
+				for (uint8_t prt_ctr=0; prt_ctr<(Evt_stack+1); prt_ctr++)
+				{
+					sprintf((char*)TextOutBuf+strlen(TextOutBuf), "Event: sub second micros:%d/%d; Event Count: %d\r\n", Evt_timestamps[prt_ctr], gps_timestamp, prt_ctr+1);
 
-				//sprintf((char*)TextOutBuf, "GPS_PPS\r\n");
+					//sprintf((char*)TextOutBuf, "GPS_PPS\r\n");
 
+				}
 			}
-			}
 
-			HAL_GPIO_TogglePin(pwr_led_GPIO_Port,pwr_led_Pin);
+			//HAL_GPIO_TogglePin(pwr_led_GPIO_Port,pwr_led_Pin);
 			//sprintf((char*)TextOutBuf, "GPS_PPS\r\n");
 			//HAL_UART_Transmit(&huart1, TextOutBuf, sizeof(TextOutBuf), 1000);
 			data_ready=1;
@@ -708,22 +792,35 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 			//TIM2->CR1 |= TIM_CR1_CEN;
 			//TIM2->SR = ~TIM_SR_CC1IF;
 		}
+
 	}
 	else
-	//if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2)  // if interrput source is channel 2, cosmic event
+		//here we are in the event case. Which is all other times we execute this routine if channel 1 wasn't used.
+
+		//if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2)  // if interrput source is channel 2, cosmic event
 	{
+		HAL_GPIO_WritePin(evt_led_GPIO_Port,evt_led_Pin, GPIO_PIN_SET);
+
+		//debugPrint(&huart1, "evt\r\n");
+
+
 		//when we have an event, we read the timer into the nth slot of the stack.
+		if (pps_started)
+		{
 		Evt_timestamps[Evt_stack] = HAL_TIM_ReadCapturedValue(&htim2, TIM_CHANNEL_2);  // capture the first value
 		Evt_stack++;
+		}
+		HAL_GPIO_WritePin(evt_led_GPIO_Port,evt_led_Pin, GPIO_PIN_SET);
+		//if (Evt_stack>30) sprintf((char*)TextOutBuf, "Event overflow");
 
-		//HAL_GPIO_TogglePin(evt_led_GPIO_Port,evt_led_Pin);
-		HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_SET); //set event pin, we'll reset it in the main loop after a v. short delay.
+		//HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_SET); //set event pin, we'll reset it in the main loop after a v. short delay.
 		if (cal_mode==1)
 		{
 			cal_events++;
 		}
+
 	}
-	data_ready=1;
+	//data_ready=1;
 	HAL_NVIC_EnableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
 	//HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
@@ -731,6 +828,8 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 
 
 void set_cal_interrupt()
+//this doesn't work? Don't know why
+//it's not essential but would facilitate calibration
 {
 	debugPrint(&huart1, "Setting interrupts for calibration\r\n");
 	EXTILine12_Config();
@@ -740,6 +839,7 @@ void set_cal_interrupt()
 
 
 void release_cal_interrupt()
+//ditto also not working, but only because the interrupts don't bind in the first place.
 {
 	debugPrint(&huart1, "Releasing interrupts for calibration\r\n");
 	HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
@@ -767,13 +867,13 @@ void cal_routine()
 
 	if (data_ready)
 	{
-	sprintf((char*)TextOutBuf, "Cal - CMF events: %d, Events/sec: %d, Ch_A: %d, Ch_B: %d, Timer: %d, average: %f\r\n", cal_cumulative, cal_events, a_events, b_events, cal_timer, rolling_average);
-	//bme_readout();
-	//read_imu();
-	//avg_temp_print();
+		sprintf((char*)TextOutBuf, "Cal - CMF events: %d, Events/sec: %d, Ch_A: %d, Ch_B: %d, Timer: %d, average: %f\r\n", cal_cumulative, cal_events, a_events, b_events, cal_timer, rolling_average);
+		//bme_readout();
+		//read_imu();
+		//avg_temp_print();
 
-	HAL_UART_Transmit(&huart1, TextOutBuf, sizeof(TextOutBuf), 1000);
-	data_ready=0;
+		HAL_UART_Transmit(&huart1, TextOutBuf, sizeof(TextOutBuf), 1000);
+		data_ready=0;
 	}
 
 	memset(&calstat[0], 0, sizeof(calstat));
@@ -812,6 +912,8 @@ void cal_routine()
 		debugPrint(&huart1, "7: enable calibration interrupts\r\n");
 		debugPrint(&huart1, "8: write to eeprom\r\n");
 		debugPrint(&huart1, "9: quit debug mode\r\n");
+		//nb when we press 9 and try starting the detector, it almost always crashes.
+		//don't know why. a command line reset fixes it.
 		debugPrint(&huart1, "0: repeat menu\r\n");
 		break;
 	case 1:
@@ -920,28 +1022,6 @@ void cal_routine()
 	default: break;
 
 	}
-
-
-
-	/*
-	debugPrint(&huart1, "got 1 char\r\n");
-	HAL_UART_Transmit(&huart1, (uint8_t *)in, 1, 1000);
-	debugPrint(&huart1, "\r\n");
-	firstint = atoi(in);
-	size = sprintf((char *)Data, "integer value: %d \r\n", firstint);
-	HAL_UART_Transmit(&huart1, Data, size, 1000);
-
-	debugPrint(&huart1, "write something 4 chars\r\n");
-
-	HAL_UART_Receive(&huart1, (uint8_t *)in, 4, 30000);
-	debugPrint(&huart1, "got something 4 chars\r\n");
-	HAL_UART_Transmit(&huart1, (uint8_t *)in, 4, 1000);
-	debugPrint(&huart1, "\r\n");
-	secondint = atoi(in);
-		size = sprintf((char *)Data, "integer value: %d \r\n", secondint);
-		HAL_UART_Transmit(&huart1, Data, size, 1000);
-	 */
-
 }
 
 
@@ -1054,9 +1134,11 @@ void flash_load()
 
 	if(EE_ReadVariable(VirtAddVarTab[0], &localread) != HAL_OK)
 	{
+		debugPrint(&huart1, "Flash read failed \r\n");
+
 		Error_Handler();
 	}
-	size = sprintf((char *)Data, "Readback EEPROM location 1: %d \r\n", VarDataTmp);
+	size = sprintf((char *)Data, "Readback EEPROM location 1: %d \r\n", localread);
 	HAL_UART_Transmit(&huart1, Data, size, 1000);
 	if (localread==1)
 	{
@@ -1089,6 +1171,23 @@ void flash_load()
 		size = sprintf((char *)Data, "Readback EEPROM location 5: %d \r\n", localread);
 		HAL_UART_Transmit(&huart1, Data, size, 1000);
 		HV_channel2=localread;
+
+		//set the values after loading.
+		set_DAC(1, DAC_channel1);
+		set_DAC(2, DAC_channel2);
+		set_HV(1, HV_channel1);
+		set_HV(2, HV_channel2);
+
+	}
+	else
+	{
+		debugPrint(&huart1, "Flash does not contain valid variables \r\n");
+		debugPrint(&huart1, "Loading default values, DAC 1 & 2 - 750, HV 1 & 2 - 180 \r\n");
+		set_DAC(1,dac1_default);
+		set_DAC(2,dac2_default);
+		set_HV(1,hv1_default);
+		set_HV(2,hv2_default);
+
 	}
 
 }
@@ -1153,13 +1252,25 @@ int main(void)
 	MX_TIM3_Init();
 	MX_USART2_UART_Init();
 
+	HAL_Delay(1500);
 	/* USER CODE BEGIN 2 */
+	//in the main routine turn on the power led. It will toggle every second thereafter via GPS PPS interrupt (TIM2).
 	HAL_GPIO_WritePin(pwr_led_GPIO_Port, pwr_led_Pin, GPIO_PIN_SET);
-	HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_SET);
-	debugPrint(&huart1, "Cosmic Pi Version 1.7 startup"); // print
-	debugPrint(&huart1, "\r\n"); // manual new line
-	//printf("bork\n");
 
+	//set out of range values to prevent spurious interrupts during start up
+	set_DAC(1, 900);
+	set_DAC(2, 900);
+	set_HV(1, 240);
+	set_HV(2, 240);
+
+
+	debugPrint(&huart1, "Cosmic Pi Version 1.7 startup \r\n"); // print
+
+	debugPrint(&huart1, "Initialise IMU...\r\n");
+	lsm9ds1_read_data_polling();
+	//if the board has a failed IMU, it'll be reported here.
+
+	//setup the pressure sensor
 	bmp280_init_default_params(&bmp280.params);
 	bmp280.addr = BMP280_I2C_ADDRESS_0;
 	bmp280.i2c = &hi2c1;
@@ -1177,52 +1288,43 @@ int main(void)
 
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
-
+	//set up the GPS - send it custom commands to perform as required.
 	debugPrint(&huart1, "Launch GPS init\r\n");
 	gps_init();
-	debugPrint(&huart1, "Initialise IMU...\r\n");
-	lsm9ds1_read_data_polling();
 
-	//bme_readout();
-	//read_imu();
-	//avg_temp_print();
-
-	uint8_t hvmove=0xFF;
-	//setting hardware values
-	set_DAC(1, DAC_channel1);
-	set_DAC(2, DAC_channel2);
-	set_HV(1, HV_channel1);
-	set_HV(2, HV_channel2);
+	//delete this if it isn't used?
+	//uint8_t hvmove=0xFF;
 
 
+	//start the timer TIM2
 	debugPrint(&huart1, "timer init - GPS\r\n");
 	HAL_TIM_IC_Start(&htim2, TIM_CHANNEL_1); //gps pps timer routine
 	HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1); //gps pps timer routine
 	//TIM_Cmd(TIM2, ENABLE);
 	TIM2->CR1 |= 0x01;
-	debugPrint(&huart1, "timer init - EVT\r\n");
+	//debugPrint(&huart1, "timer init - EVT\r\n");
 	HAL_TIM_IC_Start(&htim2, TIM_CHANNEL_2); //gps pps timer routine
 	HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_2); //event timer routine
 	TIM2->CR1 |= 0x01;
-	debugPrint(&huart1, "Starting timer 2\r\n");
+	//debugPrint(&huart1, "Starting timer 2\r\n");
 	//HAL_TIM_Base_Start();
 	HAL_TIM_Base_Start(&htim2);
 	HAL_TIM_Base_Start_IT(&htim2);
 
 
-	//HAL_UART_Transmit_DMA(&huart1, TextOutBuf, 1024);
+	//timers are started
+	//debugPrint(&huart1, "Timer started\r\n");
 
-
-	debugPrint(&huart1, "running\r\n");
-
-	//uint32_t clocksample = HAL_TIM_ReadCapturedValue(&htim2, TIM_CHANNEL_1);
-
-	uint32_t readout =0;
+	//might not be used?
+	//uint32_t readout =0;
 
 	//check if we are in calibration mode, if so run cal routine, otherwise carry on
 	if(HAL_GPIO_ReadPin(flag_GPIO_Port, flag_Pin))
 	{
 		cal_mode = 1;
+		HAL_GPIO_WritePin(pwr_led_GPIO_Port, pwr_led_Pin, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin, GPIO_PIN_RESET);
+
 	}
 	while (cal_mode==1)
 	{
@@ -1231,35 +1333,44 @@ int main(void)
 	//assuming we're not doing calibration, start up as normal.
 	HAL_NVIC_DisableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
 
-	//load cal
+	//load calibration values from eeprom.
 	flash_load();
-	set_DAC(1, DAC_channel1);
-	set_DAC(2, DAC_channel2);
-	set_HV(1, HV_channel1);
-	set_HV(2, HV_channel2);
 
 
-
-	HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_RESET);
-	char in[8];
-	uint16_t firstint=0;
-	uint16_t secondint=0;
+	//HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_RESET);
+	//char in[8];
+	//uint16_t firstint=0;
+	//uint16_t secondint=0;
 
 	//now we try to read some input;
+	//debugPrint(&huart1, "loop\r\n");
+	HAL_GPIO_WritePin(pwr_led_GPIO_Port, pwr_led_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin, GPIO_PIN_RESET);
+
 
 	HAL_NVIC_EnableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
 
+	//HAL_NVIC_EnableIRQ(TIM2_IRQn); //re-enable interrupt TIM2.
+
+
+	//infinite loop for detector operation.
 	while(1){
-		HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_RESET);
-	GPS_repeater();
+
+		//reset the EVT pin each cycle.
+		//HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_RESET);
+		//collect any characters from the GPS and print
+		GPS_repeater();
+
 		if (data_ready) {
 			HAL_NVIC_DisableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
 			HAL_UART_Transmit(&huart1, TextOutBuf, strlen(TextOutBuf), 100); //send one char at a time when idle.
 
 			HAL_NVIC_EnableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
 
-		data_ready = 0;
+			data_ready = 0;
 		}
+
+
 	}
 
 	/*
@@ -1341,16 +1452,18 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	if(GPIO_Pin == GPIO_PIN_12)
 	{
-		debugPrint(&huart1, "a_evt\r\n");
+		//debugPrint(&huart1, "a_evt\r\n");
 		a_events++;
 	}
 	if(GPIO_Pin == GPIO_PIN_11)
 	{
-		debugPrint(&huart1, "b_evt\r\n");
+		//debugPrint(&huart1, "b_evt\r\n");
 		b_events++;
 	}
 
 }
+
+
 
 /**
  * @brief System Clock Configuration
