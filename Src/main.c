@@ -751,7 +751,6 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 		{
 			//normal operation mode
 			//debugPrint(&huart1, "PPS\r\n");
-			Evt_total = Evt_total+Evt_stack; //increment total events
 			//oldtimestamp = gps_timestamp; //backup the old value
 			gps_timestamp = HAL_TIM_ReadCapturedValue(&htim2, TIM_CHANNEL_1);  // capture the first value
 
@@ -769,12 +768,13 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 			if (Evt_stack > 0) {
 				for (uint8_t prt_ctr=0; prt_ctr<(Evt_stack+1); prt_ctr++)
 				{
-					sprintf((char*)TextOutBuf+strlen(TextOutBuf), "Event: sub second micros:%d/%d; Event Count: %d\r\n", Evt_timestamps[prt_ctr], gps_timestamp, prt_ctr+1);
+					sprintf((char*)TextOutBuf+strlen(TextOutBuf), "Event: sub second micros:%d/%d; Event Count:%d\r\n", Evt_timestamps[prt_ctr], gps_timestamp, (Evt_total+prt_ctr)+1);
 
 					//sprintf((char*)TextOutBuf, "GPS_PPS\r\n");
 
 				}
 			}
+			Evt_total = Evt_total+Evt_stack; //increment total events
 
 			//HAL_GPIO_TogglePin(pwr_led_GPIO_Port,pwr_led_Pin);
 			//sprintf((char*)TextOutBuf, "GPS_PPS\r\n");
