@@ -13,4 +13,7 @@ Bug-fix list for distribution from Version 1.5 package:
 1) Raspberry pi wifi now operates an independent hotspot and a wifi client. As a reminder, CosmicPiTest is a default wifi network, password CosmicPiTest - if you create this network with another device, then the unit will auto-connect on boot. E.g. an android phone hotspot.
 2) Modified IP range for DHCP server 192.168.0.1 is the unit default, with issued addresses in the range .50-150.
 3) Installation via PIP from the cosmicpi package. 
-4) Modifications to the cosmicpi-detector service
+4) Modifications to the cosmicpi packages, not yet upstreamed. 
+  a - Modification to series.py to display Raspberry Pi Serial number instead of ERROR, modification to detector
+  b - modification to cosmicpi-detector service, automatically list events in sqlite db
+  
