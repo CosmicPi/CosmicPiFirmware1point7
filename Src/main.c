@@ -96,6 +96,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 
+IWDG_HandleTypeDef hiwdg;
+
 #define RMCGGA    "$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28\r\n" // RCM & GGA
 #define ZDA    "$PMTK314,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0*29\r\n" // ZDA
 #define GGAZDA    "$PMTK314,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0*28\r\n" // GGA & ZDA
@@ -135,7 +137,7 @@ uint32_t eeprom_value=0; //variable for reading/writing from/to eeprom
 
 
 //we define 32 addresses, each one is 32 bits long
-//define for the lsm9ds1 - sensor bus for i2c, specific.
+//define for the lsm9ds1 - sensor bus for i2c, specific.sudo siu
 #define SENSOR_BUS hi2c1
 
 
@@ -228,6 +230,7 @@ static void MX_TIM3_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_SPI2_Init(void);
+static void MX_IWDG_Init(void);
 /* USER CODE BEGIN PFP */
 uint16_t eeprom_read(uint16_t eeprom_address);
 static void EXTILine11_Config(void); //the interrupt thingy.
@@ -237,6 +240,9 @@ static void EXTILine12_Config(void); //the interrupt thingy.
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void WatchdogRefresh(void) {
+	HAL_IWDG_Refresh(&hiwdg);
+}
 void debugPrint(UART_HandleTypeDef *huart, char _out[])
 {
 	HAL_UART_Transmit(huart, (uint8_t *) _out, strlen(_out), 10);
@@ -307,29 +313,25 @@ int fputc(int ch, FILE *f){
 	return ch;
 }
 
-int ferror(FILE *f){
-	/* Your implementation of ferror(). */
-	return 0;
-}
 
 void GPS_repeater(void)
 {
 	//modify the gps routine so that it runs continuously to allow config changes in realtime.
 
 	//while(1){
-		uint8_t buffer[1];
-		uint8_t byte;
-		//memset(&buffer[0], 0, sizeof(buffer));
-		HAL_UART_Receive(&huart2, &buffer, 1, 400); //delay is arbitrary here - less than 1s otherwise interrupt
-		HAL_UART_Transmit(&huart1, &buffer, 1, HAL_MAX_DELAY); //delay here has no function, it comes out as soon as it goes in.
+	uint8_t buffer[1];
+	uint8_t byte;
+	//memset(&buffer[0], 0, sizeof(buffer));
+	HAL_UART_Receive(&huart2, &buffer, 1, 400); //delay is arbitrary here - less than 1s otherwise interrupt
+	HAL_UART_Transmit(&huart1, &buffer, 1, HAL_MAX_DELAY); //delay here has no function, it comes out as soon as it goes in.
 
-		//modified for bidirectional 27/07/20
-		//use only when debugging
-		//memset(&TextOutBuf[0], 0, sizeof(TextOutBuf));
-		//memset(&buffer[0], 0, sizeof(buffer));
+	//modified for bidirectional 27/07/20
+	//use only when debugging
+	//memset(&TextOutBuf[0], 0, sizeof(TextOutBuf));
+	//memset(&buffer[0], 0, sizeof(buffer));
 
-		//HAL_UART_Receive(&huart1, &byte, 1, 100);
-		//	HAL_UART_Transmit(&huart2, &byte, 1, 10);
+	//HAL_UART_Receive(&huart1, &byte, 1, 100);
+	//	HAL_UART_Transmit(&huart2, &byte, 1, 10);
 	//}
 
 }
@@ -412,28 +414,11 @@ void gps_init()
 {
 	//init GPS to send the right strings only.
 	//we do this a bunch of times to be sure it works.
-	printf("Start GPS init.\r\n");
-	HAL_Delay(5000);
-	HAL_UART_Transmit(&huart2, GPSRESET, sizeof(GPSRESET), HAL_MAX_DELAY);
-	HAL_Delay(5000);
+	//printf("Start GPS init.\r\n");
+	HAL_Delay(1000);
 	HAL_UART_Transmit(&huart2, GPSSETPPS, sizeof(GPSSETPPS), HAL_MAX_DELAY);
-	//HAL_Delay(100);
 	HAL_Delay(100);
 	HAL_UART_Transmit(&huart2, GGAZDA, sizeof(GGAZDA), HAL_MAX_DELAY);
-	//HAL_Delay(100);
-	HAL_Delay(100);
-	//HAL_Delay(1500); //1.5s delay for boot
-	HAL_UART_Transmit(&huart2, GPSSETPPS, sizeof(GPSSETPPS), HAL_MAX_DELAY);
-	//HAL_Delay(100);
-	HAL_Delay(100);
-	HAL_UART_Transmit(&huart2, GGAZDA, sizeof(GGAZDA), HAL_MAX_DELAY);
-	HAL_Delay(100);
-	//HAL_Delay(100);
-	HAL_UART_Transmit(&huart2, GGAZDA, sizeof(GGAZDA), HAL_MAX_DELAY);
-	HAL_Delay(100);
-	HAL_UART_Transmit(&huart2, GPSSETPPS, sizeof(GPSSETPPS), HAL_MAX_DELAY);
-	HAL_Delay(100); //1.5s delay for boot
-	HAL_UART_Transmit(&huart2, GPSSETPPS, sizeof(GPSSETPPS), HAL_MAX_DELAY);
 	HAL_Delay(100);
 	HAL_UART_Transmit(&huart2, GPSOFFSET, sizeof(GPSSETPPS), HAL_MAX_DELAY);
 
@@ -458,20 +443,7 @@ void bme_readout()
 	altitude = 44330.0f*( 1.0f - pow((pressure/1013.25f), (1.0f/5.255f)))+18;     // Calculate altitude in meters
 
 	size = sprintf((char *)TextOutBuf+strlen(TextOutBuf),"Altitude: %3.6f;\r\nTemperatureCBaro: %3.6f;\r\nPressure: %4.6f;\r\nHumidity: %2.6f;\r\n", altitude, temperature, pressure, humidity);
-	//HAL_UART_Transmit(&huart1, Data, size, 1000);
 
-	//size = sprintf((char *)Data,"Pressure: %.2f Pa, Temperature: %.2f C",
-	//		pressure, temperature);
-	//HAL_UART_Transmit(&huart1, Data, size, 1000);
-	//if (bme280p) {
-	//		size = sprintf((char *)Data,", Humidity: %.2f\n", humidity);
-	//		HAL_UART_Transmit(&huart1, Data, size, 1000);
-	//	}
-
-	//else {
-	//		size = sprintf((char *)Data, "\n");
-	//		HAL_UART_Transmit(&huart1, Data, size, 1000);
-	//	}
 }
 static void platform_init(void)
 {
@@ -625,13 +597,6 @@ void read_imu()
 
 			sprintf((char*)TextOutBuf+strlen(TextOutBuf), "AccelX: %2.6f;\r\nAccelY: %2.6f;\r\nAccelZ: %2.6f;\r\n",
 					accelx, accely, accelz);
-			//angular_rate_mdps[0], angular_rate_mdps[1], angular_rate_mdps[2]);
-			//tx_com(tx_buffer, strlen((char const*)tx_buffer));
-
-			//sprintf(IMUtext, "MagX: %2.6f;\r\nMagY: %2.6f;\r\nMagZ: %2.6f;\r\n", magx, magy, magz);
-			//WriteStringToOutputBuff(IMUtext);
-			//sprintf(IMUtext, "AccelX: %2.6f;\r\nAccelY: %2.6f;\r\nAccelZ: %2.6f;\r\n",gravx, gravy, gravz);
-			//WriteStringToOutputBuff(IMUtext);
 
 		}
 
@@ -807,8 +772,8 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 		//when we have an event, we read the timer into the nth slot of the stack.
 		if (pps_started)
 		{
-		Evt_timestamps[Evt_stack] = HAL_TIM_ReadCapturedValue(&htim2, TIM_CHANNEL_2);  // capture the first value
-		Evt_stack++;
+			Evt_timestamps[Evt_stack] = HAL_TIM_ReadCapturedValue(&htim2, TIM_CHANNEL_2);  // capture the first value
+			Evt_stack++;
 		}
 		HAL_GPIO_WritePin(evt_led_GPIO_Port,evt_led_Pin, GPIO_PIN_SET);
 		//if (Evt_stack>30) sprintf((char*)TextOutBuf, "Event overflow");
@@ -825,28 +790,6 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 	//HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 }
-
-
-void set_cal_interrupt()
-//this doesn't work? Don't know why
-//it's not essential but would facilitate calibration
-{
-	debugPrint(&huart1, "Setting interrupts for calibration\r\n");
-	EXTILine12_Config();
-	EXTILine11_Config();
-	debugPrint(&huart1, "Strig_a & Strig_b interrupts set\r\n");
-}
-
-
-void release_cal_interrupt()
-//ditto also not working, but only because the interrupts don't bind in the first place.
-{
-	debugPrint(&huart1, "Releasing interrupts for calibration\r\n");
-	HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
-	debugPrint(&huart1, "Interrupts released.\r\n");
-}
-
-
 
 void cal_routine()
 {
@@ -886,9 +829,7 @@ void cal_routine()
 	debugPrint(&huart1, "4: Set HV channel 2\r\n");
 	debugPrint(&huart1, "5: Set DAC channels 1 & 2 at the same time\r\n");
 	debugPrint(&huart1, "6: Set HV channels 1 & 2 at the same time\r\n");
-	debugPrint(&huart1, "7: enable calibration interrupts\r\n");
 	debugPrint(&huart1, "8: write to eeprom\r\n");
-	debugPrint(&huart1, "9: quit debug mode\r\n");
 	debugPrint(&huart1, "0: repeat menu\r\n");
 
 	HAL_UART_Receive(&huart1, (uint8_t *)calstat, 1, 30000); //if it times out, then we need to repeat it.
@@ -909,9 +850,7 @@ void cal_routine()
 		debugPrint(&huart1, "4: Set HV channel 2\r\n");
 		debugPrint(&huart1, "5: Set DAC channels 1 & 2 at the same time\r\n");
 		debugPrint(&huart1, "6: Set HV channels 1 & 2 at the same time\r\n");
-		debugPrint(&huart1, "7: enable calibration interrupts\r\n");
 		debugPrint(&huart1, "8: write to eeprom\r\n");
-		debugPrint(&huart1, "9: quit debug mode\r\n");
 		//nb when we press 9 and try starting the detector, it almost always crashes.
 		//don't know why. a command line reset fixes it.
 		debugPrint(&huart1, "0: repeat menu\r\n");
@@ -1008,15 +947,12 @@ void cal_routine()
 		break;
 	case 7:
 		//set the interrupts for cal... somehow
-		set_cal_interrupt();
 		break;
 	case 8:
 		flash_pgm();
 		break;
 	case 9:
 		//turn off the cal interrupts
-		release_cal_interrupt();
-		cal_mode=0;
 		break;
 
 	default: break;
@@ -1354,8 +1290,9 @@ int main(void)
 
 
 	//infinite loop for detector operation.
+	MX_IWDG_Init();
 	while(1){
-
+		WatchdogRefresh();
 		//reset the EVT pin each cycle.
 		HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_RESET);
 		//collect any characters from the GPS and print
@@ -1364,7 +1301,7 @@ int main(void)
 		if (data_ready) {
 			HAL_NVIC_DisableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
 			HAL_UART_Transmit(&huart1, TextOutBuf, strlen(TextOutBuf), 100); //send one char at a time when idle.
-
+			WatchdogRefresh();
 			HAL_NVIC_EnableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
 
 			data_ready = 0;
@@ -1386,6 +1323,28 @@ int main(void)
 	}
 	 */
 	/* USER CODE END 3 */
+}
+static void MX_IWDG_Init(void)
+{
+
+	/* USER CODE BEGIN IWDG_Init 0 */
+
+	/* USER CODE END IWDG_Init 0 */
+
+	/* USER CODE BEGIN IWDG_Init 1 */
+
+	/* USER CODE END IWDG_Init 1 */
+	hiwdg.Instance = IWDG;
+	hiwdg.Init.Prescaler = IWDG_PRESCALER_32;
+	hiwdg.Init.Reload = 4095;
+	if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	/* USER CODE BEGIN IWDG_Init 2 */
+
+	/* USER CODE END IWDG_Init 2 */
+
 }
 
 static void EXTILine12_Config(void)
@@ -1816,10 +1775,10 @@ static void MX_USART2_UART_Init(void)
 
 }
 
-/** 
+/**
  * Enable DMA controller clock
  */
-static void MX_DMA_Init(void) 
+static void MX_DMA_Init(void)
 {
 
 	/* DMA controller clock enable */
@@ -1915,7 +1874,7 @@ void Error_Handler(void)
  * @retval None
  */
 void assert_failed(uint8_t *file, uint32_t line)
-{ 
+{
 	/* USER CODE BEGIN 6 */
 	/* User can add his own implementation to report the file name and line number,
      tex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
