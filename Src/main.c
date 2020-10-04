@@ -910,7 +910,7 @@ void cal_routine()
 		settingval=0;
 		settingval = atoi(valstat);
 		HV_channel2 = settingval;
-		set_HV(2,settingval);
+		set_HV(2,HV_channel2);
 		debugPrint(&huart1, "HV channel 2 setting completed \r\n");
 		break;
 	case 5:
@@ -1070,9 +1070,21 @@ void flash_load()
 
 	if(EE_ReadVariable(VirtAddVarTab[0], &localread) != HAL_OK)
 	{
-		debugPrint(&huart1, "Flash read failed \r\n");
+		debugPrint(&huart1, "Flash read failed - either the unit has just been re-flashed or there is a problem with the EEPROM \r\n");
+		debugPrint(&huart1, "Setting default values \r\n");
+		debugPrint(&huart1, "Loading default values, DAC 1 & 2 - 750, HV 1 & 2 - 180 \r\n");
+		debugPrint(&huart1, "Programming default values to flash, DAC 1 & 2 - 750, HV 1 & 2 - 180 \r\n");
+		HV_channel1 = hv1_default;
+		HV_channel2 = hv2_default;
+		DAC_channel1 = dac1_default;
+		DAC_channel2 = dac2_default;
+		flash_pgm();
+		set_DAC(1,dac1_default);
+		set_DAC(2,dac2_default);
+		set_HV(1,hv1_default);
+		set_HV(2,hv2_default);
 
-		Error_Handler();
+		//Error_Handler();
 	}
 	size = sprintf((char *)Data, "Readback EEPROM location 1: %d \r\n", localread);
 	HAL_UART_Transmit(&huart1, Data, size, 1000);
@@ -1858,12 +1870,12 @@ static void MX_GPIO_Init(void)
  */
 void Error_Handler(void)
 {
-	while(1)
-	{
+	//while(1)
+	//{
 		/* Toggle LED2 fast */
 		//BSP_LED_Toggle(LED2);
 		//HAL_Delay(40);
-	}
+	//}
 }
 #ifdef  USE_FULL_ASSERT
 /**
