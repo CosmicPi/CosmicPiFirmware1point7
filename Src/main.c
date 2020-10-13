@@ -731,10 +731,12 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 			avg_temp_print();
 
 			if (Evt_stack > 0) {
-				for (uint8_t prt_ctr=0; prt_ctr<(Evt_stack+1); prt_ctr++)
-				{
-					sprintf((char*)TextOutBuf+strlen(TextOutBuf), "Event: sub second micros:%d/%d; Event Count:%d\r\n", Evt_timestamps[prt_ctr], gps_timestamp, (Evt_total+prt_ctr)+1);
-
+				uint16_t evt_ct = Evt_stack;
+				while (evt_ct > 0) {
+				//for (uint8_t prt_ctr=0; prt_ctr<=(Evt_stack); prt_ctr++)
+				//{
+					sprintf((char*)TextOutBuf+strlen(TextOutBuf), "Event: sub second micros:%d/%d; Event Count:%d\r\n", Evt_timestamps[evt_ct], gps_timestamp, (Evt_total+evt_ct));
+					evt_ct--;
 					//sprintf((char*)TextOutBuf, "GPS_PPS\r\n");
 
 				}
@@ -772,8 +774,9 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 		//when we have an event, we read the timer into the nth slot of the stack.
 		if (pps_started)
 		{
+			Evt_stack++; // we put event 1 in bin 1, the 0th value of the array is not used.
 			Evt_timestamps[Evt_stack] = HAL_TIM_ReadCapturedValue(&htim2, TIM_CHANNEL_2);  // capture the first value
-			Evt_stack++;
+
 		}
 		HAL_GPIO_WritePin(evt_led_GPIO_Port,evt_led_Pin, GPIO_PIN_SET);
 		//if (Evt_stack>30) sprintf((char*)TextOutBuf, "Event overflow");
@@ -1872,9 +1875,9 @@ void Error_Handler(void)
 {
 	//while(1)
 	//{
-		/* Toggle LED2 fast */
-		//BSP_LED_Toggle(LED2);
-		//HAL_Delay(40);
+	/* Toggle LED2 fast */
+	//BSP_LED_Toggle(LED2);
+	//HAL_Delay(40);
 	//}
 }
 #ifdef  USE_FULL_ASSERT
