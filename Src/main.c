@@ -108,8 +108,10 @@ IWDG_HandleTypeDef hiwdg;
 #define GPSSETPPS "$PMTK285,1,100*3D\r\n" //set the PPS to work
 #define GPSRESET "$PMTK104*37\r\n" //full reset of the GPS unit, all settings 0
 #define GPSOFFSET "$PMTK255,1*2D\r\n" //make the nema come after the pps.
-
-
+#define STGPSSET "$PSTMSETPAR,1201,1000002*2A\r\n" //config string for the ST GPS if used.
+#define STRELAY "$PSTMGETPAR,1201*22\r\n"
+#define STSAVE "$PSTMSAVEPAR*58\r\n"
+#define STRESET "$PSTMSRR\r\n"
 #define FMWVERS   "$PMTK605*31\r\n"             // PMTK_Q_RELEASE gets the firmware version
 // Sets the update intervall
 #define NORMAL    "$PMTK220,1000*1F\r\n"          // PMTK_SET_NMEA_UPDATE_1HZ
@@ -420,8 +422,18 @@ void gps_init()
 	HAL_Delay(100);
 	HAL_UART_Transmit(&huart2, GGAZDA, sizeof(GGAZDA), HAL_MAX_DELAY);
 	HAL_Delay(100);
-	HAL_UART_Transmit(&huart2, GPSOFFSET, sizeof(GPSSETPPS), HAL_MAX_DELAY);
-
+	HAL_UART_Transmit(&huart2, GPSOFFSET, sizeof(GPSOFFSET), HAL_MAX_DELAY);
+	HAL_Delay(100);
+	HAL_UART_Transmit(&huart2, STGPSSET, sizeof(STGPSSET), HAL_MAX_DELAY);
+	HAL_Delay(100);
+	HAL_UART_Transmit(&huart2, STRELAY, sizeof(STRELAY), HAL_MAX_DELAY);
+	HAL_Delay(100);
+	HAL_UART_Transmit(&huart2, STSAVE, sizeof(STRELAY), HAL_MAX_DELAY);
+	HAL_Delay(100);
+	HAL_UART_Transmit(&huart2, STRESET, sizeof(STRELAY), HAL_MAX_DELAY);
+	//while (1) {
+	//GPS_repeater();
+	//}
 	debugPrint(&huart1, "Completed GPS init.\r\n");
 
 }
@@ -825,6 +837,7 @@ void cal_routine()
 	memset(&calstat[0], 0, sizeof(calstat));
 	memset(&valstat[0], 0, sizeof(valstat));
 	debugPrint(&huart1, "Calibration Mode for Cosmic Pi V.1.7\r\n");
+	debugPrint(&huart1, "Firmware Version 08/11/2020 \r\n");
 	debugPrint(&huart1, "Choose option:\r\n");
 	debugPrint(&huart1, "1: Set DAC channel 1\r\n");
 	debugPrint(&huart1, "2: Set DAC channel 2\r\n");
@@ -1216,7 +1229,7 @@ int main(void)
 
 
 	debugPrint(&huart1, "Cosmic Pi Version 1.7 startup \r\n"); // print
-
+	debugPrint(&huart1, "Firmware Version 08/11/2020 \r\n");
 	debugPrint(&huart1, "Initialise IMU...\r\n");
 	lsm9ds1_read_data_polling();
 	//if the board has a failed IMU, it'll be reported here.
