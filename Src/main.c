@@ -207,7 +207,7 @@ uint32_t gps_timestamp =0; //value of TIM2 when GPS PPS arrives.
 
 uint8_t data_ready=0; //flag for data ready to send to UART1 via DMA.
 uint8_t cal_mode=0; //flag for calibration mode
-uint8_t imu_failed=0; //flag for failure of imu/mmu chip. One board had a failed IMU in testing
+uint8_t imu_ok=1; //flag for failure of imu/mmu chip. One board had a failed IMU in testing
 uint8_t pps_started=0;
 
 //eeprom usage map
@@ -531,13 +531,13 @@ void lsm9ds1_read_data_polling(void)
 		//while(1){
 		/* manage here device not found */
 		debugPrint(&huart1, "IMU error. IMU/MAG offline\r\n");
-		imu_failed = 1;
+		imu_ok = 0;
 		//			printf("address error");
 		//}
 	}
 
 	/* Restore default configuration */
-
+	if (imu_ok) {
 	debugPrint(&huart1, "Config restore...\r\n");
 	lsm9ds1_dev_reset_set(&dev_ctx_mag, &dev_ctx_imu, PROPERTY_ENABLE);
 	do {
@@ -576,14 +576,14 @@ void lsm9ds1_read_data_polling(void)
 	//while(1)
 	//{
 	/* Read device status register */
-
+	}
 	debugPrint(&huart1, "Completed.\r\n");
 }
 
 
 void read_imu()
 {
-	if (imu_failed == 0) {
+	if (imu_ok) {
 		lsm9ds1_dev_status_get(&dev_ctx_mag, &dev_ctx_imu, &reg);
 
 		if ( reg.status_imu.xlda && reg.status_imu.gda )
@@ -837,7 +837,7 @@ void cal_routine()
 	memset(&calstat[0], 0, sizeof(calstat));
 	memset(&valstat[0], 0, sizeof(valstat));
 	debugPrint(&huart1, "Calibration Mode for Cosmic Pi V.1.7\r\n");
-	debugPrint(&huart1, "Firmware Version 08/11/2020 \r\n");
+	debugPrint(&huart1, "Firmware Version 24/11/2020 \r\n");
 	debugPrint(&huart1, "Choose option:\r\n");
 	debugPrint(&huart1, "1: Set DAC channel 1\r\n");
 	debugPrint(&huart1, "2: Set DAC channel 2\r\n");
