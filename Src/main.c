@@ -208,6 +208,7 @@ uint32_t gps_timestamp =0; //value of TIM2 when GPS PPS arrives.
 uint8_t data_ready=0; //flag for data ready to send to UART1 via DMA.
 uint8_t cal_mode=0; //flag for calibration mode
 uint8_t imu_ok=1; //flag for failure of imu/mmu chip. One board had a failed IMU in testing
+uint8_t bmp_ok=1; //flag for failure of bmp280
 uint8_t pps_started=0;
 
 //eeprom usage map
@@ -442,20 +443,22 @@ void gps_init()
 
 void bme_readout()
 {
-	float altitude=0;
-	//HAL_Delay(100);
-	while (!bmp280_read_float(&bmp280, &temperature, &pressure, &humidity)) {
-		size = sprintf((char *)TextOutBuf+strlen(TextOutBuf),
-				"Temperature/pressure reading failed\n");
-		//HAL_UART_Transmit(&huart1, Data, size, 1000);
-		//HAL_Delay(2000);
+	while (bmp_ok > 0) {
+		float altitude=0;
+		//HAL_Delay(100);
+		if (!bmp280_read_float(&bmp280, &temperature, &pressure, &humidity)) {
+			size = sprintf((char *)TextOutBuf+strlen(TextOutBuf),
+					"Temperature/pressure reading failed\n");
+			//HAL_UART_Transmit(&huart1, Data, size, 1000);
+			//HAL_Delay(2000);
+			bmp_ok=0;
+		}
+		//convert pascals to mbar
+		pressure = pressure/100;
+		altitude = 44330.0f*( 1.0f - pow((pressure/1013.25f), (1.0f/5.255f)))+18;     // Calculate altitude in meters
+
+		size = sprintf((char *)TextOutBuf+strlen(TextOutBuf),"Altitude: %3.6f;\r\nTemperatureCBaro: %3.6f;\r\nPressure: %4.6f;\r\nHumidity: %2.6f;\r\n", altitude, temperature, pressure, humidity);
 	}
-	//convert pascals to mbar
-	pressure = pressure/100;
-	altitude = 44330.0f*( 1.0f - pow((pressure/1013.25f), (1.0f/5.255f)))+18;     // Calculate altitude in meters
-
-	size = sprintf((char *)TextOutBuf+strlen(TextOutBuf),"Altitude: %3.6f;\r\nTemperatureCBaro: %3.6f;\r\nPressure: %4.6f;\r\nHumidity: %2.6f;\r\n", altitude, temperature, pressure, humidity);
-
 }
 static void platform_init(void)
 {
@@ -538,44 +541,44 @@ void lsm9ds1_read_data_polling(void)
 
 	/* Restore default configuration */
 	if (imu_ok) {
-	debugPrint(&huart1, "Config restore...\r\n");
-	lsm9ds1_dev_reset_set(&dev_ctx_mag, &dev_ctx_imu, PROPERTY_ENABLE);
-	do {
-		lsm9ds1_dev_reset_get(&dev_ctx_mag, &dev_ctx_imu, &rst);
-	} while (rst);
+		debugPrint(&huart1, "Config restore...\r\n");
+		lsm9ds1_dev_reset_set(&dev_ctx_mag, &dev_ctx_imu, PROPERTY_ENABLE);
+		do {
+			lsm9ds1_dev_reset_get(&dev_ctx_mag, &dev_ctx_imu, &rst);
+		} while (rst);
 
-	/* Enable Block Data Update */
-	lsm9ds1_block_data_update_set(&dev_ctx_mag, &dev_ctx_imu, PROPERTY_ENABLE);
-
-
-	debugPrint(&huart1, "Set scale...\r\n");
-	/* Set full scale */
-	lsm9ds1_xl_full_scale_set(&dev_ctx_imu, LSM9DS1_2g);
-	lsm9ds1_gy_full_scale_set(&dev_ctx_imu, LSM9DS1_2000dps);
-	lsm9ds1_mag_full_scale_set(&dev_ctx_mag, LSM9DS1_16Ga);
+		/* Enable Block Data Update */
+		lsm9ds1_block_data_update_set(&dev_ctx_mag, &dev_ctx_imu, PROPERTY_ENABLE);
 
 
-	debugPrint(&huart1, "Set bandwidth...\r\n");
-	/* Configure filtering chain - See datasheet for filtering chain details */
-	/* Accelerometer filtering chain */
-	lsm9ds1_xl_filter_aalias_bandwidth_set(&dev_ctx_imu, LSM9DS1_AUTO);
-	lsm9ds1_xl_filter_lp_bandwidth_set(&dev_ctx_imu, LSM9DS1_LP_ODR_DIV_50);
-	lsm9ds1_xl_filter_out_path_set(&dev_ctx_imu, LSM9DS1_LP_OUT);
-	/* Gyroscope filtering chain */
-	lsm9ds1_gy_filter_lp_bandwidth_set(&dev_ctx_imu, LSM9DS1_LP_ULTRA_LIGHT);
-	lsm9ds1_gy_filter_hp_bandwidth_set(&dev_ctx_imu, LSM9DS1_HP_MEDIUM);
-	lsm9ds1_gy_filter_out_path_set(&dev_ctx_imu, LSM9DS1_LPF1_HPF_LPF2_OUT);
+		debugPrint(&huart1, "Set scale...\r\n");
+		/* Set full scale */
+		lsm9ds1_xl_full_scale_set(&dev_ctx_imu, LSM9DS1_2g);
+		lsm9ds1_gy_full_scale_set(&dev_ctx_imu, LSM9DS1_2000dps);
+		lsm9ds1_mag_full_scale_set(&dev_ctx_mag, LSM9DS1_16Ga);
 
 
-	debugPrint(&huart1, "Set outputmode...\r\n");
-	/* Set Output Data Rate / Power mode */
-	lsm9ds1_imu_data_rate_set(&dev_ctx_imu, LSM9DS1_IMU_59Hz5);
-	lsm9ds1_mag_data_rate_set(&dev_ctx_mag, LSM9DS1_MAG_UHP_10Hz);
+		debugPrint(&huart1, "Set bandwidth...\r\n");
+		/* Configure filtering chain - See datasheet for filtering chain details */
+		/* Accelerometer filtering chain */
+		lsm9ds1_xl_filter_aalias_bandwidth_set(&dev_ctx_imu, LSM9DS1_AUTO);
+		lsm9ds1_xl_filter_lp_bandwidth_set(&dev_ctx_imu, LSM9DS1_LP_ODR_DIV_50);
+		lsm9ds1_xl_filter_out_path_set(&dev_ctx_imu, LSM9DS1_LP_OUT);
+		/* Gyroscope filtering chain */
+		lsm9ds1_gy_filter_lp_bandwidth_set(&dev_ctx_imu, LSM9DS1_LP_ULTRA_LIGHT);
+		lsm9ds1_gy_filter_hp_bandwidth_set(&dev_ctx_imu, LSM9DS1_HP_MEDIUM);
+		lsm9ds1_gy_filter_out_path_set(&dev_ctx_imu, LSM9DS1_LPF1_HPF_LPF2_OUT);
 
-	/* Read samples in polling mode (no int) */
-	//while(1)
-	//{
-	/* Read device status register */
+
+		debugPrint(&huart1, "Set outputmode...\r\n");
+		/* Set Output Data Rate / Power mode */
+		lsm9ds1_imu_data_rate_set(&dev_ctx_imu, LSM9DS1_IMU_59Hz5);
+		lsm9ds1_mag_data_rate_set(&dev_ctx_mag, LSM9DS1_MAG_UHP_10Hz);
+
+		/* Read samples in polling mode (no int) */
+		//while(1)
+		//{
+		/* Read device status register */
 	}
 	debugPrint(&huart1, "Completed.\r\n");
 }
@@ -745,8 +748,8 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 			if (Evt_stack > 0) {
 				uint16_t evt_ct = Evt_stack;
 				while (evt_ct > 0) {
-				//for (uint8_t prt_ctr=0; prt_ctr<=(Evt_stack); prt_ctr++)
-				//{
+					//for (uint8_t prt_ctr=0; prt_ctr<=(Evt_stack); prt_ctr++)
+					//{
 					sprintf((char*)TextOutBuf+strlen(TextOutBuf), "Event: sub second micros:%d/%d; Event Count:%d\r\n", Evt_timestamps[evt_ct], gps_timestamp, (Evt_total+evt_ct));
 					evt_ct--;
 					//sprintf((char*)TextOutBuf, "GPS_PPS\r\n");
@@ -837,7 +840,7 @@ void cal_routine()
 	memset(&calstat[0], 0, sizeof(calstat));
 	memset(&valstat[0], 0, sizeof(valstat));
 	debugPrint(&huart1, "Calibration Mode for Cosmic Pi V.1.7\r\n");
-	debugPrint(&huart1, "Firmware Version 24/11/2020 \r\n");
+	debugPrint(&huart1, "Firmware Version 29/11/2020 \r\n");
 	debugPrint(&huart1, "Choose option:\r\n");
 	debugPrint(&huart1, "1: Set DAC channel 1\r\n");
 	debugPrint(&huart1, "2: Set DAC channel 2\r\n");
@@ -1238,107 +1241,115 @@ int main(void)
 	bmp280_init_default_params(&bmp280.params);
 	bmp280.addr = BMP280_I2C_ADDRESS_0;
 	bmp280.i2c = &hi2c1;
-
-	while (!bmp280_init(&bmp280, &bmp280.params)) {
-		size = sprintf((char *)Data, "BMP280 initialization failed\r\n");
-		HAL_UART_Transmit(&huart1, Data, size, 1000);
-		HAL_Delay(2000);
+	while (bmp_ok>0) {
+		if (bmp280_init(&bmp280, &bmp280.params)) {
+			size = sprintf((char *)Data, "BMP280 initialization ok\r\n");
+			HAL_UART_Transmit(&huart1, Data, size, 1000);
+			HAL_Delay(2000);
+		}
+		else
+		{
+			bmp_ok = 0;
+			size = sprintf((char *)Data, "BMP280 initialization failed\r\n");
+			HAL_UART_Transmit(&huart1, Data, size, 1000);
+			HAL_Delay(2000);
+		}
 	}
 	bool bme280p = bmp280.id == BME280_CHIP_ID;
 	size = sprintf((char *)Data, "BMP280: found %s\r\n", bme280p ? "BME280" : "BMP280");
 	HAL_UART_Transmit(&huart1, Data, size, 1000);
 
-	/* USER CODE END 2 */
+/* USER CODE END 2 */
 
-	/* Infinite loop */
-	/* USER CODE BEGIN WHILE */
-	//set up the GPS - send it custom commands to perform as required.
-	debugPrint(&huart1, "Launch GPS init\r\n");
-	gps_init();
+/* Infinite loop */
+/* USER CODE BEGIN WHILE */
+//set up the GPS - send it custom commands to perform as required.
+debugPrint(&huart1, "Launch GPS init\r\n");
+gps_init();
 
-	//delete this if it isn't used?
-	//uint8_t hvmove=0xFF;
-
-
-	//start the timer TIM2
-	debugPrint(&huart1, "timer init - GPS\r\n");
-	HAL_TIM_IC_Start(&htim2, TIM_CHANNEL_1); //gps pps timer routine
-	HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1); //gps pps timer routine
-	//TIM_Cmd(TIM2, ENABLE);
-	TIM2->CR1 |= 0x01;
-	//debugPrint(&huart1, "timer init - EVT\r\n");
-	HAL_TIM_IC_Start(&htim2, TIM_CHANNEL_2); //gps pps timer routine
-	HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_2); //event timer routine
-	TIM2->CR1 |= 0x01;
-	//debugPrint(&huart1, "Starting timer 2\r\n");
-	//HAL_TIM_Base_Start();
-	HAL_TIM_Base_Start(&htim2);
-	HAL_TIM_Base_Start_IT(&htim2);
+//delete this if it isn't used?
+//uint8_t hvmove=0xFF;
 
 
-	//timers are started
-	//debugPrint(&huart1, "Timer started\r\n");
-
-	//might not be used?
-	//uint32_t readout =0;
-
-	//check if we are in calibration mode, if so run cal routine, otherwise carry on
-	if(HAL_GPIO_ReadPin(flag_GPIO_Port, flag_Pin))
-	{
-		cal_mode = 1;
-		HAL_GPIO_WritePin(pwr_led_GPIO_Port, pwr_led_Pin, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin, GPIO_PIN_RESET);
-
-	}
-	while (cal_mode==1)
-	{
-		cal_routine(); //it's within a while loop so it can be exited. don't forget to cancel the cal interrupts if exiting
-	}
-	//assuming we're not doing calibration, start up as normal.
-	HAL_NVIC_DisableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
-
-	//load calibration values from eeprom.
-	flash_load();
+//start the timer TIM2
+debugPrint(&huart1, "timer init - GPS\r\n");
+HAL_TIM_IC_Start(&htim2, TIM_CHANNEL_1); //gps pps timer routine
+HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1); //gps pps timer routine
+//TIM_Cmd(TIM2, ENABLE);
+TIM2->CR1 |= 0x01;
+//debugPrint(&huart1, "timer init - EVT\r\n");
+HAL_TIM_IC_Start(&htim2, TIM_CHANNEL_2); //gps pps timer routine
+HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_2); //event timer routine
+TIM2->CR1 |= 0x01;
+//debugPrint(&huart1, "Starting timer 2\r\n");
+//HAL_TIM_Base_Start();
+HAL_TIM_Base_Start(&htim2);
+HAL_TIM_Base_Start_IT(&htim2);
 
 
-	//HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_RESET);
-	//char in[8];
-	//uint16_t firstint=0;
-	//uint16_t secondint=0;
+//timers are started
+//debugPrint(&huart1, "Timer started\r\n");
 
-	//now we try to read some input;
-	//debugPrint(&huart1, "loop\r\n");
+//might not be used?
+//uint32_t readout =0;
+
+//check if we are in calibration mode, if so run cal routine, otherwise carry on
+if(HAL_GPIO_ReadPin(flag_GPIO_Port, flag_Pin))
+{
+	cal_mode = 1;
 	HAL_GPIO_WritePin(pwr_led_GPIO_Port, pwr_led_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin, GPIO_PIN_RESET);
 
+}
+while (cal_mode==1)
+{
+	cal_routine(); //it's within a while loop so it can be exited. don't forget to cancel the cal interrupts if exiting
+}
+//assuming we're not doing calibration, start up as normal.
+HAL_NVIC_DisableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
 
-	HAL_NVIC_EnableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
+//load calibration values from eeprom.
+flash_load();
 
-	//HAL_NVIC_EnableIRQ(TIM2_IRQn); //re-enable interrupt TIM2.
+
+//HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_RESET);
+//char in[8];
+//uint16_t firstint=0;
+//uint16_t secondint=0;
+
+//now we try to read some input;
+//debugPrint(&huart1, "loop\r\n");
+HAL_GPIO_WritePin(pwr_led_GPIO_Port, pwr_led_Pin, GPIO_PIN_RESET);
+HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin, GPIO_PIN_RESET);
 
 
-	//infinite loop for detector operation.
-	MX_IWDG_Init();
-	while(1){
+HAL_NVIC_EnableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
+
+//HAL_NVIC_EnableIRQ(TIM2_IRQn); //re-enable interrupt TIM2.
+
+
+//infinite loop for detector operation.
+MX_IWDG_Init();
+while(1){
+	WatchdogRefresh();
+	//reset the EVT pin each cycle.
+	HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_RESET);
+	//collect any characters from the GPS and print
+	GPS_repeater();
+
+	if (data_ready) {
+		HAL_NVIC_DisableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
+		HAL_UART_Transmit(&huart1, TextOutBuf, strlen(TextOutBuf), 100); //send one char at a time when idle.
 		WatchdogRefresh();
-		//reset the EVT pin each cycle.
-		HAL_GPIO_WritePin(evt_led_GPIO_Port, evt_led_Pin,  GPIO_PIN_RESET);
-		//collect any characters from the GPS and print
-		GPS_repeater();
+		HAL_NVIC_EnableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
 
-		if (data_ready) {
-			HAL_NVIC_DisableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
-			HAL_UART_Transmit(&huart1, TextOutBuf, strlen(TextOutBuf), 100); //send one char at a time when idle.
-			WatchdogRefresh();
-			HAL_NVIC_EnableIRQ(TIM2_IRQn); //disable interrupts on call, regardless of type. renable at the end.
-
-			data_ready = 0;
-		}
-
-
+		data_ready = 0;
 	}
 
-	/*
+
+}
+
+/*
 	while (1)
 	{
 		if (data_ready == 1) {
@@ -1349,8 +1360,8 @@ int main(void)
 		}
 
 	}
-	 */
-	/* USER CODE END 3 */
+ */
+/* USER CODE END 3 */
 }
 static void MX_IWDG_Init(void)
 {
